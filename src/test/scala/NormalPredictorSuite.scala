@@ -1,63 +1,82 @@
-import FloatOps._
-import prob_predictor._
+
 import org.scalacheck.Arbitrary._
+import org.scalacheck.Prop.{BooleanOperators, forAll}
 import org.scalacheck._
 import org.scalatest.FunSuite
-import org.scalatest.prop.PropertyChecks
+import org.scalatest.prop.Checkers
+import prob_predictor._
 import probability_monad.Distribution
 
 import scala.math.abs
 import scala.util.Random
 
+trait CommonSuite {
+  val precisionThreshold = 1e-2
+  val equalPrecisionThreshold = 1e-4
 
-class NormalPredictorSuite extends FunSuite with PropertyChecks {
+  val doubleGenerator = Gen.choose[Double](-1E10, 1E10)
+  val cntSamplesGenerator = Gen.choose[Int](1, 100).suchThat(_ > 0)
+  implicit lazy val arbDouble: Arbitrary[Double] = Arbitrary(doubleGenerator)
+}
+
+
+class NormalPredictorSuite extends FunSuite with Checkers with CommonSuite {
+
+  import DistributionOps._
 
   implicit override val generatorDrivenConfig: PropertyCheckConfiguration =
     PropertyCheckConfiguration(minSuccessful = 10)
 
-  private val cntSamplesGenerator = Gen.choose[Int](1, 100).suchThat(_ > 0)
 
   test("constant history createByPreviousData") {
-    forAll(cntSamplesGenerator) { cnt =>
-      forAll { (x: Double) =>
-        NormalPredictor.createByPreviousData(Array.fill(cnt)(x)) ==
-          NormalDistribution(
-            mu = x,
-            sigma = 0,
-            cntSamples = cnt
-          )
-      }
+    def prop(cnt: Int, x: Double): Prop = {
+      val res = NormalPredictor.createByPreviousData(Array.fill(cnt)(x))
+      res ~== NormalDistribution(x, 0.0, cnt)
     }
+
+    check(prop(1, 1.7056235756310583E-4))
+
+    check(forAll(cntSamplesGenerator) { cnt =>
+      forAll { (x: Double) =>
+        prop(cnt, x)
+      }
+    })
   }
 
   test("check mean and variance createByPreviousData") {
-    forAll(cntSamplesGenerator) { cnt =>
+    check(forAll(cntSamplesGenerator) { cnt =>
       forAll { (x: Double, y: Double) =>
         val res = NormalPredictor.createByPreviousData(Array.fill(cnt)(x) ++ Array.fill(cnt)(y))
         val trueMean = (x + y) / 2
-        val trueSigma = Math.pow((x - y) / 2, 2) / (2 * cnt - 1)
-        res match {
-          case NormalDistribution(mu, sigma, cntSamples) =>
-            mu == trueMean & (sigma ~= trueSigma) & (cntSamples == cnt * 2)
-          case _ => false
-        }
+        val trueSigma = abs(x - y) / 2
+        res ~== NormalDistribution(trueMean, trueSigma, cnt * 2)
       }
-    }
+    })
   }
 
+
   test("feed new element is equivalent to feeding whole sequence originally") {
-    forAll { (history: List[Double], x: Double) =>
-      whenever(history.nonEmpty) {
-        NormalPredictor.createByPreviousData(history).feedNext(x) ==
-          NormalPredictor.createByPreviousData(x :: history)
-      }
+    def prop(history: List[Double], x: Double) = {
+      val feeded = NormalPredictor.createByPreviousData(history).feedNext(x)
+      val original = NormalPredictor.createByPreviousData(x :: history)
+      feeded ~== original
     }
+
+    check({
+      forAll { (history: List[Double], x: Double) =>
+        history.nonEmpty ==> prop(history, x)
+      }
+
+    })
   }
 
 
 }
 
-class NormalDistributionSuite extends FunSuite with PropertyChecks {
+class NormalDistributionSuite extends FunSuite with Checkers with CommonSuite {
+
+  import FloatOps._
+
   Random.setSeed(1)
   val samples = 30000
 
@@ -65,28 +84,38 @@ class NormalDistributionSuite extends FunSuite with PropertyChecks {
     PropertyCheckConfiguration(minSuccessful = 1)
 
 
-  def assertMean(D: Distribution[Double], mean: Double): Boolean = {
+  def assertMean(D: Distribution[Double], mean: Double): Prop = {
     val res = D.sample(samples).sum / samples
-    res ~= mean
+    (res ~= mean) :| s"$res !~= $mean"
   }
 
   test("Normal Distribution mean and variance") {
-    forAll { (mu: Double, sigma: Double) =>
-      whenever(sigma >= 0) {
+    check(forAll { (mu: Double, sigma: Double) =>
+      (sigma >= 0) ==> {
         val D = NormalDistribution(mu = mu, sigma = sigma)
-        assertMean(D, mu) & assertMean((D - mu).map(x => x * x), sigma * sigma)
+        assertMean(D, mu) && assertMean(D.map(x => x * x), sigma * sigma + mu * mu)
       }
-    }
+    })
   }
+
+
+  //  test("Normal Distribution ksTest") {
+  //    check(forAll { (mu: Double, sigma: Double) =>
+  //      (sigma >= 0) ==> {
+  //        val D = NormalDistribution(mu = mu, sigma = sigma)
+  //        (Distribution.ksTest(D, Distribution.normal * sigma + (mu - 0.4), samples) > 0.1) :| "for different distributions, value must be > 0.01" &&
+  //          (Distribution.ksTest(D, Distribution.normal * sigma + (mu - 0.5), samples) < 0.1) :| "for same distributions, value must be < 0.1"
+  //      }
+  //    })
+  //  }
+
 
 }
 
 
-object FloatOps {
-  private val precisionThreshold = 1e-2
-  private val equalPrecisionThreshold = 1e-4
+object FloatOps extends CommonSuite {
 
-  /** Long floating comparison: assert(double ~= 1.7). */
+  /** Long floating comparison: assert(Double ~= 1.7). */
   implicit class DoubleOps(val self: Double) extends AnyVal {
     def ~=(that: Double): Boolean =
       if (abs(that) <= 1) abs(self - that) < precisionThreshold
@@ -94,10 +123,28 @@ object FloatOps {
   }
 
   implicit class DoubleEqualOps(val self: Double) extends AnyVal {
-    def ==(that: Double): Boolean =
+    def ~==(that: Double): Boolean =
       if (abs(that) <= 1) abs(self - that) < equalPrecisionThreshold
       else abs((self / that) - 1) < equalPrecisionThreshold
   }
 
 }
 
+
+object DistributionOps extends CommonSuite {
+
+  import FloatOps._
+
+  implicit class DistributionEqualOps(val self: Distribution[Double]) extends AnyVal {
+    def ~==(that: NormalDistribution): Prop =
+      self match {
+        case NormalDistribution(mu, sigma, cntSamples) =>
+          (cntSamples == that.cntSamples) :| s"$cntSamples == ${that.cntSamples}" &&
+            (mu ~== that.mu) :| s"$mu ~== ${that.mu}" &&
+            (sigma >= 0.0) :| s"$sigma >= 0.0"
+          (sigma ~== that.sigma) :| s"$sigma ~== ${that.sigma}"
+        case _ => false :| s"doesn't match"
+      }
+  }
+
+}
