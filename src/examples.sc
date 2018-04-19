@@ -15,7 +15,8 @@ val sunsetD = NormalPredictor.createByPreviousData(sunset)
 
 // You can feed new measurements to distributions
 // as if you originally had this measurement
-val newHighD = highD.feedNext(77.7)
+val newHighD = highD.feedNext(177.7)
+newHighD.sample(10)
 
 // to get predicted temperature for certain time of the day, just run e.g.
 highD.sample(10)
@@ -41,3 +42,5 @@ val plain = for {
   dayT <- daysD.sample(2)
   t <- dayT
 } yield t
+
+

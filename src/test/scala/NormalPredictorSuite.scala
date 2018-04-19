@@ -11,7 +11,7 @@ import scala.math.abs
 import scala.util.Random
 
 trait CommonSuite {
-  val precisionThreshold = 1e-2
+  val precisionThreshold = 1e-1
   val equalPrecisionThreshold = 1e-4
 
   val doubleGenerator = Gen.choose[Double](-1E10, 1E10)
@@ -78,7 +78,7 @@ class NormalDistributionSuite extends FunSuite with Checkers with CommonSuite {
   import FloatOps._
 
   Random.setSeed(1)
-  val samples = 30000
+  val samples = 10000
 
   implicit override val generatorDrivenConfig: PropertyCheckConfiguration =
     PropertyCheckConfiguration(minSuccessful = 1)

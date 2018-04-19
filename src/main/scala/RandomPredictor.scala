@@ -16,7 +16,7 @@ trait Recomputable[A] extends Distribution[A] {
 case class NormalDistribution(mu: Double, sigma: Double, cntSamples: Int = 0) extends Distribution[Double] with Recomputable[Double] {
   def get: Double = {
     val z = normal.get
-    z * sigma + (mu - 0.5)
+    z * sigma + mu
   }
 
   def feedNext(x: Double): NormalDistribution = {
